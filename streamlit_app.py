@@ -2,8 +2,6 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from PIL import Image
-from skimage.transform import resize
-from skimage.filters import threshold_otsu
 from streamlit_drawable_canvas import st_canvas
 import joblib
 import tensorflow as tf
@@ -220,6 +218,28 @@ canvas_result = st_canvas(
     update_streamlit=realtime,
 )
 
+# ================= Utilities (no scikit-image) =================
+def otsu_threshold(arr_0_1: np.ndarray) -> float:
+    """Otsu threshold on [0,1] image using NumPy only."""
+    hist, _ = np.histogram((arr_0_1 * 255).astype(np.uint8), bins=256, range=(0, 255))
+    hist = hist.astype(np.float64)
+    total = arr_0_1.size
+    prob = hist / (total + 1e-12)
+    omega = np.cumsum(prob)
+    mu = np.cumsum(prob * np.arange(256))
+    mu_t = mu[-1]
+    denom = omega * (1.0 - omega)
+    denom[denom == 0] = np.nan
+    sigma_b2 = (mu_t * omega - mu) ** 2 / denom
+    k_star = int(np.nanargmax(sigma_b2))
+    return (k_star + 0.5) / 255.0
+
+def resize_pil(arr_0_1: np.ndarray, new_h: int, new_w: int) -> np.ndarray:
+    """Resize with Pillow (bilinear), keep [0,1] float32."""
+    im = Image.fromarray((arr_0_1 * 255).astype("uint8"))
+    im = im.resize((new_w, new_h), resample=Image.BILINEAR)
+    return np.asarray(im, dtype=np.float32) / 255.0
+
 # ================= MNIST-style preprocessing =================
 def preprocess(img_rgba):
     """
@@ -242,9 +262,9 @@ def preprocess(img_rgba):
     if border.mean() > 0.5:
         arr = 1.0 - arr  # make digit white on black
 
-    # Otsu threshold
+    # Otsu threshold (NumPy)
     try:
-        thr = threshold_otsu(arr)
+        thr = otsu_threshold(arr)
     except Exception:
         thr = 0.3
     bin_img = (arr > thr).astype(np.uint8)
@@ -261,7 +281,7 @@ def preprocess(img_rgba):
     h, w = cropped.shape
     scale = 20.0 / max(h, w)
     new_h, new_w = max(1, int(round(h * scale))), max(1, int(round(w * scale)))
-    small = resize(cropped, (new_h, new_w), anti_aliasing=True, preserve_range=True).astype("float32")
+    small = resize_pil(cropped, new_h, new_w)
 
     arr28 = np.zeros((28, 28), dtype="float32")
     y_off = (28 - new_h) // 2
