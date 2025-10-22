@@ -2,20 +2,20 @@
 streamlit==1.50.0
 streamlit-drawable-canvas==0.9.3
 
-# TensorFlow/Keras with wheels for Python 3.13
+# TensorFlow/Keras for Python 3.13
 tensorflow==2.20.0
-keras==3.6.0
+keras>=3.10.0,<3.11.0
 
-# Scientific stack compatible with Py3.13 & TF 2.20
+# Scientific stack (Py3.13 + TF 2.20 compatible)
 numpy==2.1.3
 pandas==2.2.3
 pillow==11.0.0
 scikit-learn==1.5.2
 h5py==3.12.1
 
-# Pins that keep TF happy on 3.13
+# Keep TF happy
 protobuf==5.28.3
 typing-extensions==4.12.2
 grpcio==1.66.1
-opt-einsum==3.3.0
 wrapt==1.16.0
+opt-einsum==3.3.0
