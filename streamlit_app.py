@@ -2,12 +2,18 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from PIL import Image
-from streamlit_drawable_canvas import st_canvas
 import joblib
 import tensorflow as tf
 from tensorflow.keras.models import load_model as tf_load_model
 from pathlib import Path
 from typing import Optional, Tuple, List
+
+# ---- try to import canvas widget; fall back to upload if missing ----
+try:
+    from streamlit_drawable_canvas import st_canvas
+    HAS_CANVAS = True
+except ModuleNotFoundError:
+    HAS_CANVAS = False
 
 # ================= Page config =================
 st.set_page_config(page_title="MNIST — 3 Models Playground", page_icon="🧠", layout="wide")
@@ -204,19 +210,50 @@ bg_color = st.sidebar.color_picker("Background color", "#000000")
 stroke_color = st.sidebar.color_picker("Pen color", "#FFFFFF")
 realtime = st.sidebar.checkbox("Realtime predict", value=True)
 
-# ================= Canvas =================
+# ================= Input (canvas or upload) =================
 st.subheader("✍️ Draw a digit (0–9)")
-canvas_result = st_canvas(
-    fill_color="rgba(255, 255, 255, 0)",
-    stroke_width=stroke_width,
-    stroke_color=stroke_color,
-    background_color=bg_color,
-    width=280,
-    height=280,
-    drawing_mode="freedraw",
-    key="canvas",
-    update_streamlit=realtime,
-)
+input_img = None
+
+if HAS_CANVAS:
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 255, 255, 0)",
+        stroke_width=stroke_width,
+        stroke_color=stroke_color,
+        background_color=bg_color,
+        width=280,
+        height=280,
+        drawing_mode="freedraw",
+        key="canvas",
+        update_streamlit=realtime,
+    )
+    if st.button("🧹 Clear"):
+        st.rerun()
+    if canvas_result is not None and canvas_result.image_data is not None:
+        input_img = canvas_result.image_data
+else:
+    st.warning(
+        "The drawing widget `streamlit-drawable-canvas` is not installed.\n\n"
+        "• Add `streamlit-drawable-canvas==0.9.3` to requirements.txt (recommended), or\n"
+        "• Upload a 28×28 or larger digit image below."
+    )
+    uploaded = st.file_uploader("Upload a PNG/JPG of a single digit", type=["png", "jpg", "jpeg"])
+    if uploaded is not None:
+        try:
+            pil = Image.open(uploaded).convert("RGBA")
+            base = Image.new("RGBA", (280, 280), (0, 0, 0, 255))
+            # keep inside 280x280, centered
+            ratio = min(280 / pil.width, 280 / pil.height, 1.0)
+            nw, nh = max(1, int(pil.width * ratio)), max(1, int(pil.height * ratio))
+            pil = pil.resize((nw, nh))
+            ox, oy = (280 - nw) // 2, (280 - nh) // 2
+            base.paste(pil, (ox, oy), pil if pil.mode == "RGBA" else None)
+            input_img = np.array(base)
+        except Exception as e:
+            st.error(f"Could not read image: {e}")
+
+if input_img is None:
+    st.info("Draw on the canvas (or upload an image) to get predictions.")
+    st.stop()
 
 # ================= Utilities (no scikit-image) =================
 def otsu_threshold(arr_0_1: np.ndarray) -> float:
@@ -341,19 +378,8 @@ def predict_dt(arr_flat):
         oh[cls] = 1.0
         return oh
 
-# ================= UI / Inference =================
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.caption("Canvas (280×280). Clear then draw a bold digit.")
-    if st.button("🧹 Clear"):
-        st.rerun()
-
-if canvas_result.image_data is None:
-    st.info("Start drawing to get predictions.")
-    st.stop()
-
-arr28, arr4d, arr_flat = preprocess(canvas_result.image_data[:, :, :3])
+# ================= Inference =================
+arr28, arr4d, arr_flat = preprocess(input_img[:, :, :3])
 
 def predict_all():
     out = {}
@@ -368,6 +394,14 @@ def predict_all():
 
 results = predict_all()
 
+# ================= Display =================
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.subheader("🔎 What the model sees (28×28)")
+    st.image((arr28 * 255).astype("uint8"), width=140, caption="Preprocessed 28×28 grayscale")
+    st.caption("Tip: Draw thick strokes and keep the digit centered for best results.")
+
 with col2:
     if mode == "Compare all":
         st.subheader("📊 Predictions (All Models)")
@@ -377,6 +411,7 @@ with col2:
             st.write(f"**{name}** → Predicted: **{pred}**  | Confidence: {conf:.2f}")
             st.bar_chart(pd.Series(proba, index=list(range(10))))
     else:
+        # chosen is one of ["DNN", "CNN", "DecisionTree"]
         if chosen == "CNN" and len(cnn_models) > 1:
             name = f"CNN (ensemble x{len(cnn_models)})"
         else:
@@ -394,7 +429,3 @@ with col2:
         conf = float(np.max(proba))
         st.metric("Predicted Digit", pred, help="Highest-probability class")
         st.bar_chart(pd.Series(proba, index=list(range(10))))
-
-st.subheader("🔎 What the model sees (28×28)")
-st.image((arr28 * 255).astype("uint8"), width=140, caption="Preprocessed 28×28 grayscale")
-st.caption("Tip: Draw thick strokes and keep the digit centered for best results.")
